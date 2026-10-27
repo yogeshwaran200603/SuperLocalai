@@ -1,0 +1,23 @@
+name: doc_search
+category: doc_search
+description: "Indexes local PDFs and notes with keyword/vector representations to answer queries with citations."
+permissions: read_only
+steps_template:
+  - id: 1
+    description: "Scan documents directory for PDFs, Markdown, and text files"
+    tool: "file_list"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: []
+  - id: 2
+    description: "Extract document passages and build search index"
+    tool: "file_read"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: [1]
+  - id: 3
+    description: "Match query against index and compile cited answers"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [2]

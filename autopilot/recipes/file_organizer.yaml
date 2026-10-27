@@ -1,0 +1,25 @@
+name: file_organizer
+category: file_organizer
+description: "Scans target folder (e.g. Downloads), builds organization plan (dry run), and safely sorts files."
+permissions: workspace_write
+steps_template:
+  - id: 1
+    description: "Scan target directory and categorize files by extension and date"
+    tool: "file_list"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: []
+  - id: 2
+    description: "Generate dry-run move plan and display to user"
+    tool: "file_write"
+    args:
+      path: "organize_plan.txt"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [1]
+  - id: 3
+    description: "Execute organized file migrations safely"
+    tool: "file_move"
+    risk_level: "medium"
+    permission_level: "workspace_write"
+    dependencies: [2]

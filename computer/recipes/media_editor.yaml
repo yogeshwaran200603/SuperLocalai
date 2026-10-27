@@ -1,0 +1,71 @@
+name: media_editor
+description: "Generic media editing workflow: find free-license footage, download to sandbox, import into video editor, and place on timeline."
+parameters:
+  editor: "CapCut"
+  query: "ocean waves"
+  track: 2
+  timestamp: "00:00:10:00"
+steps_template:
+  - id: 1
+    description: "Launch video editor application"
+    action: "open_app"
+    args:
+      name: "{{editor}}"
+    method: "a11y"
+  - id: 2
+    description: "Focus video editor main window"
+    action: "focus_window"
+    args:
+      title: "{{editor}}"
+    method: "a11y"
+  - id: 3
+    description: "Launch browser and search free-license media sources (Pexels, Pixabay, Wikimedia)"
+    action: "browser_search"
+    args:
+      query: "site:pexels.com {{query}} video or site:pixabay.com {{query}}"
+    method: "playwright"
+  - id: 4
+    description: "Inspect license terms on source page and document in SOURCES.md"
+    action: "verify_license"
+    args:
+      terms_check: "free commercial license"
+    method: "friction_handler"
+  - id: 5
+    description: "Download verified free-license media file directly into session sandbox"
+    action: "download_media"
+    args:
+      destination: "{{sandbox}}/footage.mp4"
+    method: "sandbox_download"
+  - id: 6
+    description: "Switch focus back to video editor"
+    action: "focus_window"
+    args:
+      title: "{{editor}}"
+    method: "a11y"
+  - id: 7
+    description: "Import footage into project using menu shortcuts (Ctrl+I or File > Import)"
+    action: "hotkey"
+    args:
+      keys: ["ctrl", "i"]
+    fallback:
+      menu: ["File", "Import"]
+    method: "keyboard_menu"
+  - id: 8
+    description: "Select downloaded footage file from session sandbox"
+    action: "file_select"
+    args:
+      path: "{{sandbox}}/footage.mp4"
+    method: "a11y"
+  - id: 9
+    description: "Navigate to target timestamp and place footage on specified video track"
+    action: "timeline_placement"
+    args:
+      track: "{{track}}"
+      timestamp: "{{timestamp}}"
+    method: "ocr_timeline"
+    verification: "before_after_frame_check"
+  - id: 10
+    description: "Verify timeline placement and generate completion report with reliability audit"
+    action: "done"
+    args:
+      summary: "Imported {{query}} footage into {{editor}} on track {{track}} at {{timestamp}}."

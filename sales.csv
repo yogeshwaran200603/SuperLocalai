@@ -1,0 +1,10 @@
+Region,Product,Units_Sold,Revenue
+North,Laptop,15,15000
+North,Mouse,,500
+South,Keyboard,20,1600
+South,Monitor,10,
+East,Laptop,12,12000
+East,Mouse,25,625
+West,Monitor,,
+West,Laptop,8,8000
+North,Laptop,15,15000

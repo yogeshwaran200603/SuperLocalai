@@ -1,0 +1,29 @@
+name: deep_research
+category: deep_research
+description: "Executes deep web research across multi-query citations and generates a structured Word/PDF report."
+permissions: read_only
+steps_template:
+  - id: 1
+    description: "Formulate research queries and search the web"
+    tool: "browser_goto"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: []
+  - id: 2
+    description: "Extract text, compare sources, and verify cross-citations"
+    tool: "browser_read_text"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: [1]
+  - id: 3
+    description: "Synthesize findings into cited Markdown report"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [2]
+  - id: 4
+    description: "Export formal research document as PDF or DOCX"
+    tool: "doc_create_pdf"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [3]

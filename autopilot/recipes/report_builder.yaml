@@ -1,0 +1,29 @@
+name: report_builder
+category: report_builder
+description: "Ingests CSV/Excel files, performs cleaning, plots charts, and compiles a PowerPoint slide deck."
+permissions: workspace_write
+steps_template:
+  - id: 1
+    description: "Inspect data structure and summary statistics"
+    tool: "data_inspect"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: []
+  - id: 2
+    description: "Clean nulls and normalize columns"
+    tool: "data_clean"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [1]
+  - id: 3
+    description: "Generate visualization charts from key metrics"
+    tool: "data_chart"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [2]
+  - id: 4
+    description: "Compile visual report into a 5-slide PowerPoint deck"
+    tool: "doc_create_pptx"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [3]

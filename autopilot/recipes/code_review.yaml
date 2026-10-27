@@ -1,0 +1,29 @@
+name: code_review
+category: code_review
+description: "Audits repository for security flaws, bugs, performance anti-patterns, and compiles a Markdown review."
+permissions: read_only
+steps_template:
+  - id: 1
+    description: "Enumerate repository source tree and configuration files"
+    tool: "file_list"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: []
+  - id: 2
+    description: "Scan code for OWASP security vulnerabilities and secrets"
+    tool: "file_read"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: [1]
+  - id: 3
+    description: "Analyze code complexity, test coverage, and architecture"
+    tool: "file_read"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: [2]
+  - id: 4
+    description: "Compile and save comprehensive REVIEW_REPORT.md"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [3]

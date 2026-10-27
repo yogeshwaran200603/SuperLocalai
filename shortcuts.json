@@ -1,0 +1,29 @@
+{
+  "discord_servers": {
+    "my server": "discord://-/channels/SERVER_ID/CHANNEL_ID"
+  },
+  "websites": {
+    "youtube": "https://youtube.com",
+    "yt": "https://youtube.com",
+    "github": "https://github.com",
+    "whatsapp": "https://web.whatsapp.com"
+  },
+  "apps": {
+    "vscode": "code",
+    "chrome": "chrome",
+    "chorme": "chrome",
+    "notepad": "notepad",
+    "calculator": "calc",
+    "discord": "discord",
+    "cmd": "cmd",
+    "cmd prompt": "cmd",
+    "command prompt": "cmd",
+    "terminal": "cmd"
+  },
+  "folders": {
+    "desktop": "%USERPROFILE%\\Desktop",
+    "documents": "%USERPROFILE%\\Documents",
+    "downloads": "%USERPROFILE%\\Downloads",
+    "workspace": "%USERPROFILE%\\astra_workspace"
+  }
+}

@@ -1,0 +1,60 @@
+# Environment variables and secrets (CRITICAL)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime Logs & Transient Session Data
+logs/
+*.log
+data/optimizer_quarantine/
+data/optimizer_reports/
+data/poki_replays/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+desktop.ini

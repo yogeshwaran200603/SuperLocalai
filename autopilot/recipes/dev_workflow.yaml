@@ -1,0 +1,49 @@
+name: dev_workflow
+category: web_app
+description: "End-to-end development workflow: scaffold, open in VS Code, code, test in browser, and deliver."
+permissions: workspace_write
+steps_template:
+  - id: 1
+    description: "Scaffold project structure and initial files"
+    tool: "scaffold_project"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: []
+  - id: 2
+    description: "Open project in Visual Studio Code for live visibility"
+    tool: "run_powershell"
+    args:
+      script: "code ."
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [1]
+  - id: 3
+    description: "Implement core source files, styles, and logic"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [1]
+  - id: 4
+    description: "Initialize isolated dependencies if needed"
+    tool: "run_powershell"
+    risk_level: "medium"
+    permission_level: "workspace_write"
+    dependencies: [3]
+  - id: 5
+    description: "Run automated tests to verify code integrity"
+    tool: "run_tests"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [3]
+  - id: 6
+    description: "Audit web application interface in browser for console errors"
+    tool: "test_website"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: [4, 5]
+  - id: 7
+    description: "Commit final changes to git and generate REPORT.md"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [6]

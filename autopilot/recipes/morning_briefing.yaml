@@ -1,0 +1,27 @@
+name: morning_briefing
+category: morning_briefing
+description: "Inspects calendar, weather, notes, speaks briefing aloud, and launches default productivity apps."
+permissions: system
+steps_template:
+  - id: 1
+    description: "Fetch local weather and system notifications"
+    tool: "run_powershell"
+    args:
+      script: "Get-Date; (Get-WmiObject -Class Win32_Battery).EstimatedChargeRemaining"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: []
+  - id: 2
+    description: "Compile and present spoken morning summary"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [1]
+  - id: 3
+    description: "Launch requested daily applications"
+    tool: "open_app"
+    args:
+      name: "browser"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [2]

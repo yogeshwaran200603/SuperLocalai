@@ -1,0 +1,37 @@
+name: bug_fixer
+category: bug_fixer
+description: "Isolates failing tests, inspects stack traces, creates git branch, and patches code until green."
+permissions: workspace_write
+steps_template:
+  - id: 1
+    description: "Run test suite to identify and isolate failures"
+    tool: "run_tests"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: []
+  - id: 2
+    description: "Create a dedicated git fix branch"
+    tool: "run_powershell"
+    args:
+      script: "git checkout -b fix-autopilot-patch"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [1]
+  - id: 3
+    description: "Apply targeted code patch to address root cause"
+    tool: "fix_and_rerun"
+    risk_level: "medium"
+    permission_level: "workspace_write"
+    dependencies: [1, 2]
+  - id: 4
+    description: "Re-run full test suite to ensure green regression status"
+    tool: "run_tests"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [3]
+  - id: 5
+    description: "Commit verified patch and summarize fixes in REPORT.md"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [4]

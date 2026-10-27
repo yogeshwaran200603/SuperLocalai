@@ -1,0 +1,27 @@
+name: system_doctor
+category: system_doctor
+description: "Audits CPU, memory, disk usage, startup items, and proposes optimization fixes without unapproved changes."
+permissions: system
+steps_template:
+  - id: 1
+    description: "Inspect resource bottlenecks: CPU, memory, top processes"
+    tool: "run_powershell"
+    args:
+      script: "Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 Id,ProcessName,CPU,WS"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: []
+  - id: 2
+    description: "Check system drive health and free space"
+    tool: "run_powershell"
+    args:
+      script: "Get-PSDrive C | Select-Object Used,Free"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: [1]
+  - id: 3
+    description: "Synthesize findings into SYSTEM_HEALTH_REPORT.md with suggested fixes"
+    tool: "file_write"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: [2]

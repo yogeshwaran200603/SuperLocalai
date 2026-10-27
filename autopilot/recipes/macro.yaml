@@ -1,0 +1,23 @@
+name: macro
+category: macro
+description: "Replays recorded desktop interaction macros as a deterministic step in an autopilot pipeline."
+permissions: system
+steps_template:
+  - id: 1
+    description: "Verify target application window is foregrounded"
+    tool: "desktop_focus_window"
+    risk_level: "low"
+    permission_level: "workspace_write"
+    dependencies: []
+  - id: 2
+    description: "Execute recorded macro sequence with safety checks"
+    tool: "desktop_hotkey"
+    risk_level: "medium"
+    permission_level: "system"
+    dependencies: [1]
+  - id: 3
+    description: "Verify macro outcome and log completion"
+    tool: "get_screen_text"
+    risk_level: "low"
+    permission_level: "read_only"
+    dependencies: [2]
