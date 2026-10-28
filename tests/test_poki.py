@@ -17,6 +17,7 @@ All tests use mocks with ZERO live cloud calls.
 import time
 import numpy as np
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from poki.guards import (
@@ -58,7 +59,9 @@ from poki.capture import LatencyMonitor, GameCanvasCapture
 from poki.overlay import PokiOverlay
 from poki.runner import PokiGameRunner
 from poki.stats import PokiStatsManager
-from poki import handle_poki_command, list_poki_skills
+from poki import handle_poki_command, list_poki_skills, run_poki_debug
+from poki.launcher import normalize_poki_url, PokiGameLauncher
+from agent import try_local_first_execution
 from safety import reset_emergency_stop
 
 
@@ -348,3 +351,178 @@ def test_poki_commands_dispatcher():
     res_stop = handle_poki_command("/poki stop")
     assert "stopped" in res_stop.lower()
     reset_emergency_stop()
+
+
+# 10. Natural Language Routing Tests (Zero Model Calls)
+def test_natural_language_play_routing():
+    with patch("poki.runner.PokiGameRunner.play") as mock_play:
+        mock_play.return_value = {"success": True, "summary": "Played cricket session"}
+
+        # "play cricket"
+        res1 = try_local_first_execution("play cricket")
+        assert res1 is not None
+        assert "Played cricket session" in res1
+
+        # "play the game"
+        res2 = try_local_first_execution("play the game")
+        assert res2 is not None
+
+        # "play 2048"
+        res3 = try_local_first_execution("play 2048")
+        assert res3 is not None
+
+        # "can you play cricket"
+        res4 = try_local_first_execution("can you play cricket")
+        assert res4 is not None
+
+        # "play"
+        res5 = try_local_first_execution("play")
+        assert res5 is not None
+
+        # "stop"
+        res_stop = try_local_first_execution("stop")
+        assert "emergency stop" in res_stop.lower()
+        reset_emergency_stop()
+
+
+# 11. Cricket URL Normalization & Aliases
+def test_cricket_url_normalization():
+    assert normalize_poki_url("cricket") == "https://poki.com/en/g/little-master-cricket"
+    assert normalize_poki_url("little master cricket") == "https://poki.com/en/g/little-master-cricket"
+    assert normalize_poki_url("little master") == "https://poki.com/en/g/little-master-cricket"
+    assert normalize_poki_url("little-master-cricket") == "https://poki.com/en/g/little-master-cricket"
+    assert normalize_poki_url("https://poki.com/en/g/2048") == "https://poki.com/en/g/2048"
+
+
+# 12. Launcher Retry and Safe Spot Focus
+def test_launcher_retry_and_safe_focus():
+    launcher = PokiGameLauncher()
+    mock_page = MagicMock()
+    mock_page.title.return_value = "Little Master Cricket"
+    mock_page.inner_text.return_value = "Single player batting game"
+    mock_page.locator.return_value.all.return_value = []
+    mock_page.locator.return_value.first.count.return_value = 1
+    mock_page.locator.return_value.first.bounding_box.return_value = {"x": 100, "y": 80, "width": 640, "height": 360}
+
+    # Simulate goto failure once, then retry success
+    mock_page.goto.side_effect = [Exception("Network timeout"), MagicMock()]
+
+    with patch("poki.launcher.get_browser_page", return_value=mock_page):
+        ok, msg, p = launcher.launch_game("cricket")
+        assert ok is True
+        assert mock_page.goto.call_count == 2
+        # Verify safe click focused canvas center (100 + 320, 80 + 180) = (420, 260)
+        mock_page.mouse.click.assert_called_with(420, 260)
+
+
+# 13. Little Master Cricket: Ball Detection with HSV
+def test_cricket_ball_detection_hsv():
+    import cv2
+    from poki.skills.cricket import LittleMasterCricketSkill
+
+    skill = LittleMasterCricketSkill()
+    # Create blank canvas
+    frame = np.zeros((360, 640, 3), dtype=np.uint8)
+
+    # Ball absent
+    assert skill.detect_ball(frame) is None
+
+    # Draw bright red cricket ball at (350, 220) with radius 12
+    cv2.circle(frame, (350, 220), 12, (0, 0, 230), -1)
+
+    ball = skill.detect_ball(frame)
+    assert ball is not None
+    bx, by, bradius = ball
+    assert abs(bx - 350) <= 2
+    assert abs(by - 220) <= 2
+    assert abs(bradius - 12) <= 3
+
+
+# 14. Cricket Batting Action & Timing Window
+def test_cricket_timing_window_and_action():
+    import cv2
+    from poki.skills.cricket import LittleMasterCricketSkill
+
+    skill = LittleMasterCricketSkill()
+    skill.reset()
+
+    # Step 1: Ball starts approaching
+    frame1 = np.zeros((360, 640, 3), dtype=np.uint8)
+    cv2.circle(frame1, (380, 220), 12, (0, 0, 230), -1)
+    act1 = skill.decide_action(frame1)
+    # Ball is still far from strike zone (480)
+    assert act1 is None
+
+    # Step 2: Ball arrives in strike window (~480)
+    frame2 = np.zeros((360, 640, 3), dtype=np.uint8)
+    cv2.circle(frame2, (475, 220), 12, (0, 0, 230), -1)
+    act2 = skill.decide_action(frame2)
+
+    assert act2 is not None
+    assert act2["action"] == "drag"
+    assert "batting swing" in act2["description"].lower()
+    assert skill.current_score > 0
+
+    # Step 3: Tunable timing offset
+    skill.tune_timing_offset(15.0)
+    assert skill.timing_offset_ms == 15.0
+
+
+# 15. Cricket Benchmark & Timing Reliability Report
+def test_cricket_benchmark_and_reliability_report():
+    from poki.skills.cricket import LittleMasterCricketSkill
+
+    skill = LittleMasterCricketSkill()
+    assert skill.average_score == 38.0
+    report = LittleMasterCricketSkill.get_timing_reliability_report()
+    assert "jitter" in report.lower()
+    assert "timing" in report.lower()
+    assert "tune_timing_offset" in report
+
+
+# 16. Loop Step Cap (200 Iterations) and Model Budget
+def test_runner_200_step_cap():
+    mock_page = MagicMock()
+    mock_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+
+    runner = PokiGameRunner("cricket", max_runs=1)
+    assert runner.max_loop_iterations == 200
+    assert runner.max_model_calls == 5
+
+    with patch.object(runner.launcher, "launch_game", return_value=(True, "ok", mock_page)), \
+         patch("poki.runner.GameCanvasCapture.capture_frame", return_value=mock_frame), \
+         patch("poki.runner.time.sleep", return_value=None):
+        res = runner.play()
+        assert res["success"] is True
+        assert runner.model_calls_used <= 5
+
+
+# 17. /poki debug Command
+def test_poki_debug_command(tmp_path):
+    mock_page = MagicMock()
+    mock_page.url = "https://poki.com/en/g/little-master-cricket"
+    mock_page.title.return_value = "Little Master Cricket - Poki"
+    mock_page.is_closed.return_value = False
+
+    with patch("poki.get_active_game_page", return_value=mock_page), \
+         patch("poki.PokiGameLauncher.detect_game_canvas_bounds", return_value=(100, 50, 640, 360)), \
+         patch("poki.capture.GameCanvasCapture.capture_frame", return_value=np.zeros((360, 640, 3), dtype=np.uint8)):
+        res = run_poki_debug()
+        assert "poki.com/en/g/little-master-cricket" in res["url"]
+        assert res["bounds"] == (100, 50, 640, 360)
+        assert res["size"] == (640, 360)
+        assert Path(res["snapshot_path"]).exists()
+
+        # Command dispatcher integration
+        cmd_res = handle_poki_command("/poki debug")
+        assert "poki debug: url=" in cmd_res.lower()
+
+
+# 18. Skills Poki Alias Import Path Compatibility
+def test_skills_poki_alias_import():
+    from skills.poki import LittleMasterCricketSkill as AliasCricket
+    from skills.poki.cricket import LittleMasterCricketSkill as DirectCricket
+    from poki.skills.cricket import LittleMasterCricketSkill as OriginalCricket
+
+    assert AliasCricket is OriginalCricket
+    assert DirectCricket is OriginalCricket

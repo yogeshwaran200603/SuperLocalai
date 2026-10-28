@@ -1,0 +1,22 @@
+{
+  "cricket": {
+    "runs": 6,
+    "high_score": 0.0,
+    "total_score": 0.0,
+    "average_score": 0.0,
+    "total_survival_time": 98.28076553344727,
+    "successful_runs": 0,
+    "success_rate": 0.0,
+    "last_played": "2026-10-28 19:23:26"
+  },
+  "little master cricket": {
+    "runs": 20,
+    "high_score": 4.0,
+    "total_score": 4.0,
+    "average_score": 0.2,
+    "total_survival_time": 170.24837565422058,
+    "successful_runs": 0,
+    "success_rate": 0.0,
+    "last_played": "2026-10-28 19:21:01"
+  }
+}

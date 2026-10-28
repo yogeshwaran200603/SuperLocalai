@@ -6,6 +6,7 @@ Provides access to built-in and dynamically learned game skills:
 3. Match-3 / Mahjong (Cascade Best-Swap Solver)
 4. Endless Runner (Obstacle Threshold Policy)
 5. Snake (Safe BFS Pathfinding Policy)
+6. Little Master Cricket (HSV Ball Tracking & Bat Swing Policy)
 """
 
 from typing import Dict, Any, List, Optional
@@ -15,6 +16,7 @@ from poki.skills.sudoku import SudokuSkill
 from poki.skills.match3 import Match3Skill
 from poki.skills.runner import EndlessRunnerSkill
 from poki.skills.snake import SnakeSkill
+from poki.skills.cricket import LittleMasterCricketSkill
 
 _BUILTIN_SKILLS: List[BaseSkill] = [
     Game2048Skill(),
@@ -22,6 +24,7 @@ _BUILTIN_SKILLS: List[BaseSkill] = [
     Match3Skill(),
     EndlessRunnerSkill(),
     SnakeSkill(),
+    LittleMasterCricketSkill(),
 ]
 
 
@@ -67,6 +70,7 @@ __all__ = [
     "Match3Skill",
     "EndlessRunnerSkill",
     "SnakeSkill",
+    "LittleMasterCricketSkill",
     "get_skill_for_game",
     "list_available_skills",
 ]

@@ -304,6 +304,27 @@ def try_local_first_execution(prompt: str) -> Optional[str]:
         from optimizer import handle_optimizer_command
         return handle_optimizer_command(p.replace("@optimize", "/optimize"))
 
+    # Natural Language Emergency Stop Fast Path
+    if p_lower in ("stop", "/stop", "emergency stop", "quit game", "stop game", "stop playing"):
+        from safety import trigger_emergency_stop
+        trigger_emergency_stop("Stopped by user command 'stop'")
+        return "Emergency stop signal triggered. Active game or automation stopped."
+
+    # Natural Language Poki Game Fast Path (Zero model calls)
+    # Intercepts: "play <game>", "play the game", "play cricket", "can you play <game>", "play"
+    poki_play_match = re.search(
+        r"^(?:can\s+you\s+|could\s+you\s+|please\s+)?(?:start\s+)?play(?:ing)?(?:\s+(?:the\s+)?game)?(?:\s+(.*))?$",
+        p_lower
+    )
+    if poki_play_match:
+        target_game = (poki_play_match.group(1) or "").strip()
+        target_game = re.sub(r"^(?:on\s+poki|in\s+poki|poki)\s*", "", target_game).strip()
+        from poki import handle_poki_command
+        if target_game:
+            return handle_poki_command(f"/poki play {target_game}")
+        else:
+            return handle_poki_command("/poki play")
+
     # Natural Language PC Optimizer Fast Path
     if any(trigger in p_lower for trigger in ("why is my pc slow", "why is pc slow", "pc is slow", "computer is slow", "optimize my pc", "clean my pc", "pc optimizer")):
         from optimizer import handle_optimizer_command
