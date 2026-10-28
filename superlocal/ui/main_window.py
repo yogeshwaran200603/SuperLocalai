@@ -36,7 +36,7 @@ from superlocal.ui.widgets.activity_panel import ActivityPanel
 from superlocal.ui.widgets.approval_dialog import ApprovalDialog
 from superlocal.ui.widgets.quick_command import QuickCommandBar
 from superlocal.ui.widgets.control_overlay import ControlOverlayPill
-from superlocal.ui.widgets.tray import SuperLocalTrayIcon
+from superlocal.ui.widgets.tray import SuperLocalTrayIcon, create_default_tray_icon
 from superlocal.ui.pages.chat_page import ChatPage
 from superlocal.ui.pages.tasks_page import TasksPage
 from superlocal.ui.pages.voice_page import VoicePage
@@ -98,6 +98,7 @@ class SuperLocalMainWindow(QMainWindow):
         self.bridge = QtEventBridge()
 
         self.setWindowTitle("SuperLocal")
+        self.setWindowIcon(create_default_tray_icon())
         self.resize(1180, 760)
         self.setMinimumSize(900, 600)
         self.setStyleSheet(get_stylesheet(dark=True))

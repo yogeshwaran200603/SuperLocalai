@@ -14,7 +14,11 @@ from superlocal.ui.theme import Colors
 
 
 def create_default_tray_icon() -> QIcon:
-    """Generate a clean in-memory icon if no .ico file exists yet."""
+    """Generate or load the SuperLocal app icon."""
+    from pathlib import Path
+    for p in [Path("assets/icon.ico"), Path("assets/icon.png")]:
+        if p.exists():
+            return QIcon(str(p))
     pix = QPixmap(32, 32)
     pix.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pix)
