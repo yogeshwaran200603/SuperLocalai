@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
 
 if sys.platform == "win32":
+    if not hasattr(sys, "coinit_flags"):
+        sys.coinit_flags = 2  # Revert to STA COM threading mode fix
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -69,6 +71,8 @@ from rich.table import Table
 from config import (
     GEMINI_API_KEY,
     MODEL_NAME,
+    TEXT_MODEL,
+    FALLBACK_MODEL,
     TAKEOVER_MODEL,
     LOGS_DIR,
     SCREENS_DIR,
@@ -80,6 +84,7 @@ from safety import (
     confirm_sensitive_desktop_action,
     is_sensitive_target_or_text,
     log_action,
+    format_truthful_status,
 )
 from tools.desktop import cleanup_old_screenshots
 
@@ -209,64 +214,104 @@ def capture_window_or_screen() -> Tuple[Image.Image, int, int]:
 def detect_uia_clickable_elements(win_x: int, win_y: int, win_w: int, win_h: int) -> List[Dict[str, Any]]:
     """
     Extracts clickable elements from pywinauto UIA inside the target window boundary.
-    Returns list of dicts with element details and bounding box.
+    Limits: active window only, max depth 6, max 80 elements, 5 s timeout in a cancellable worker thread.
+    Skips huge trees (browsers, Electron, canvases) to prevent hangs.
     """
-    elements = []
-    try:
-        import pywinauto
-        desktop = pywinauto.Desktop(backend="uia")
-        # Find active or top-level window
-        top_windows = desktop.windows()
-        target_win = None
-        for w in top_windows:
-            try:
-                rect = w.rectangle()
-                if abs(rect.left - win_x) < 50 and abs(rect.top - win_y) < 50:
-                    target_win = w
-                    break
-            except Exception:
-                continue
+    elements: List[Dict[str, Any]] = []
 
-        if not target_win and top_windows:
-            target_win = top_windows[0]
+    def _worker(result_container: list, cancel_event: threading.Event):
+        try:
+            import sys
+            if not hasattr(sys, "coinit_flags"):
+                sys.coinit_flags = 2
+            import pywinauto
 
-        if target_win:
-            descendants = target_win.descendants()
-            allowed_types = {
-                "Button", "Edit", "MenuItem", "TabItem", "CheckBox",
-                "RadioButton", "Hyperlink", "ListItem", "ComboBox", "Document"
-            }
-            count = 0
-            for el in descendants:
+            desktop = pywinauto.Desktop(backend="uia")
+            top_windows = desktop.windows()
+            target_win = None
+            for w in top_windows:
+                if cancel_event.is_set():
+                    return
                 try:
-                    c_type = el.element_info.control_type
-                    if c_type in allowed_types:
-                        rect = el.rectangle()
-                        if rect.width() > 10 and rect.height() > 10:
-                            # Verify inside captured region
-                            if (rect.left >= win_x - 10 and rect.top >= win_y - 10 and
-                                rect.right <= win_x + win_w + 10 and rect.bottom <= win_y + win_h + 10):
-                                count += 1
-                                elements.append({
-                                    "id": count,
-                                    "type": c_type,
-                                    "name": el.window_text().strip(),
-                                    "left": rect.left,
-                                    "top": rect.top,
-                                    "right": rect.right,
-                                    "bottom": rect.bottom,
-                                    "cx": (rect.left + rect.right) // 2,
-                                    "cy": (rect.top + rect.bottom) // 2,
-                                })
-                                if count >= 45:  # Cap UI overlays to maintain clarity
-                                    break
+                    rect = w.rectangle()
+                    if abs(rect.left - win_x) < 50 and abs(rect.top - win_y) < 50:
+                        target_win = w
+                        break
                 except Exception:
                     continue
-    except Exception as e:
-        # UIA may not be available for all custom or directX canvases
-        pass
 
-    return elements
+            if not target_win and top_windows:
+                target_win = top_windows[0]
+
+            if not target_win:
+                return
+
+            # Skip huge trees (browsers, Electron, game canvases)
+            try:
+                win_title = (target_win.window_text() or "").lower()
+                c_name = (target_win.element_info.class_name or "").lower()
+                huge_tree_signals = (
+                    "chrome", "msedge", "edge", "firefox", "brave", "opera",
+                    "electron", "slack", "discord", "code", "teams", "canvas"
+                )
+                if any(s in win_title or s in c_name for s in huge_tree_signals):
+                    return
+            except Exception:
+                pass
+
+            allowed_types = {
+                "Button", "Edit", "MenuItem", "TabItem", "CheckBox",
+                "RadioButton", "Hyperlink", "ListItem", "ComboBox", "Document", "Text"
+            }
+
+            # Breadth-first search with depth limit 6
+            queue = [(target_win, 0)]
+            count = 0
+
+            while queue and count < 80 and not cancel_event.is_set():
+                curr, depth = queue.pop(0)
+                if depth > 6:
+                    continue
+                try:
+                    for ch in curr.children():
+                        if cancel_event.is_set() or count >= 80:
+                            break
+                        try:
+                            c_type = ch.element_info.control_type
+                            if c_type in allowed_types:
+                                rect = ch.rectangle()
+                                if rect.width() > 10 and rect.height() > 10:
+                                    if (rect.left >= win_x - 10 and rect.top >= win_y - 10 and
+                                        rect.right <= win_x + win_w + 10 and rect.bottom <= win_y + win_h + 10):
+                                        count += 1
+                                        result_container.append({
+                                            "id": count,
+                                            "type": c_type,
+                                            "name": ch.window_text().strip(),
+                                            "left": rect.left,
+                                            "top": rect.top,
+                                            "right": rect.right,
+                                            "bottom": rect.bottom,
+                                            "cx": (rect.left + rect.right) // 2,
+                                            "cy": (rect.top + rect.bottom) // 2,
+                                        })
+                            if depth < 6:
+                                queue.append((ch, depth + 1))
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    cancel_ev = threading.Event()
+    th = threading.Thread(target=_worker, args=(elements, cancel_ev), daemon=True)
+    th.start()
+    th.join(timeout=5.0)
+    if th.is_alive():
+        cancel_ev.set()
+
+    return elements[:80]
 
 
 def prepare_takeover_observation() -> Tuple[bytes, float, int, int, Dict[int, Dict[str, Any]], str]:
@@ -423,9 +468,11 @@ def plan_takeover_batch(
     )
 
     # Candidate models in priority order for Takeover Mode
+    # Computer-use preview model is used ONLY in takeover mode, with fallback to TEXT_MODEL and FALLBACK_MODEL
     candidate_models = [
         TAKEOVER_MODEL,
-        "gemini-3.8-flash",
+        TEXT_MODEL,
+        FALLBACK_MODEL,
     ]
 
     http_opts = types.HttpOptions(
@@ -445,6 +492,7 @@ def plan_takeover_batch(
         system_instruction=system_prompt,
         temperature=0.1,
         thinking_config=thinking_cfg,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
     last_error = None
@@ -502,12 +550,16 @@ def verify_batch_outcome(task: str, batch_summary: str, screenshot_path: str) ->
             f"VERIFIED: YES or NO\n"
             f"REASON: short explanation"
         )
+        gen_config = types.GenerateContentConfig(
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+        )
         response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
+            model=TEXT_MODEL,
             contents=[
                 types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
                 prompt
-            ]
+            ],
+            config=gen_config,
         )
         text = response.text.strip() if response and response.text else ""
         if "VERIFIED: NO" in text.upper():
@@ -686,7 +738,7 @@ def run_takeover_mode(task: str) -> str:
             # Check if task is already done
             if batch[0].get("action") == "done":
                 summary = batch[0].get("summary", "Takeover task completed successfully.")
-                console.print(f"\n[bold green][OK] Task Completed:[/bold green] {summary}")
+                console.print(f"\n{format_truthful_status('SUCCESS', summary)}")
                 return summary
 
             console.print(f"\n[bold magenta]Planned Batch of {len(batch)} action(s):[/bold magenta]")
@@ -695,11 +747,14 @@ def run_takeover_mode(task: str) -> str:
             batch_summaries = []
             for act in batch:
                 if total_actions_used >= TAKEOVER_MAX_ACTIONS:
-                    console.print(f"[bold yellow]Reached 30 actions limit ({TAKEOVER_MAX_ACTIONS}). Stopping takeover.[/bold yellow]")
-                    return f"Takeover completed: reached 30 actions limit. Final state observed."
+                    msg = f"Takeover completed: reached {TAKEOVER_MAX_ACTIONS} actions limit. Final state observed."
+                    console.print(f"\n{format_truthful_status('PARTIAL', msg)}")
+                    return msg
 
                 if is_emergency_stopped():
-                    return "Takeover Mode halted via emergency stop (Ctrl+Alt+Q)."
+                    msg = "Takeover Mode halted via emergency stop (Ctrl+Alt+Q)."
+                    console.print(f"\n{format_truthful_status('FAILED', msg)}")
+                    return msg
 
                 total_actions_used += 1
                 action_desc = f"{act.get('action')}({act.get('id') or act.get('keys') or act.get('text') or ''})"
@@ -711,7 +766,9 @@ def run_takeover_mode(task: str) -> str:
                 log_action("takeover_action", act, "SUCCESS" if success else "FAILED", result_msg)
 
                 if act.get("action") == "done":
-                    return act.get("summary", "Takeover task completed.")
+                    summary = act.get("summary", "Takeover task completed.")
+                    console.print(f"\n{format_truthful_status('SUCCESS', summary)}")
+                    return summary
 
                 if not success:
                     console.print(f"    [red]Action failed:[/red] {result_msg}")
@@ -726,12 +783,15 @@ def run_takeover_mode(task: str) -> str:
                 consecutive_verification_failures += 1
                 console.print(f"  [yellow]Visual Verification Notice ({consecutive_verification_failures}/3): {v_reason}[/yellow]")
                 if consecutive_verification_failures >= 3:
-                    console.print("[bold red]Takeover stopped: 3 consecutive visual verifications failed.[/bold red]")
-                    return "Takeover Mode stopped: 3 consecutive visual verifications failed."
+                    fail_msg = "No-progress detected: 3 consecutive visual verifications failed or screen state unchanged."
+                    console.print(f"\n{format_truthful_status('FAILED', fail_msg)}")
+                    return f"Takeover Mode stopped: {fail_msg}"
             else:
                 consecutive_verification_failures = 0
 
-        return f"Takeover finished: used maximum {TAKEOVER_MAX_ACTIONS} actions."
+        final_msg = f"Takeover finished: used maximum {TAKEOVER_MAX_ACTIONS} actions."
+        console.print(f"\n{format_truthful_status('PARTIAL', final_msg)}")
+        return final_msg
 
     finally:
         monitor.stop()

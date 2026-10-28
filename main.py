@@ -378,16 +378,16 @@ def check_startup_providers(agent: AstraAgent):
     """
     Checks configured providers at startup.
     If Ollama is local, tries auto-starting 'ollama serve' in background (up to 10s).
-    If unreachable or model not found, prints clear actionable hint.
+    If unreachable or model not found, prints exact fix ('ollama serve', 'ollama pull <model>').
     """
     for prov in agent.provider_chain:
         if isinstance(prov, OllamaProvider) and any(h in prov.host for h in ("localhost", "127.0.0.1", "0.0.0.0")):
             is_h, details, fix = prov.health_check(auto_start=True)
             if not is_h:
                 if "not found" in details.lower():
-                    console.print(f"[bold yellow]Run: ollama pull {prov.model}[/bold yellow]")
+                    console.print(f"[bold yellow]Notice: Model '{prov.model}' not found in Ollama. Run: 'ollama pull {prov.model}'[/bold yellow]")
                 else:
-                    console.print(f"[bold yellow]Notice:[/bold yellow] Ollama is not ready ({escape(details)}). {escape(str(fix))}")
+                    console.print(f"[bold yellow]Notice: Ollama server is offline at {prov.host}. Run 'ollama serve' and 'ollama pull {prov.model}'[/bold yellow]")
 
 
 def handle_voice_command(cmd: str, agent: Optional[AstraAgent] = None):

@@ -50,12 +50,12 @@ class TestQuotaOptimizationSuite(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_config_quota_settings(self):
-        """Validates config defaults: MODEL_CHAIN exists, MAX_STEPS=8, QUOTA_PER_DAY=20, CACHE_TTL=600."""
+        """Validates config defaults: MODEL_CHAIN exists, MAX_STEPS=8, CACHE_TTL=600, no hardcoded default of 20 for quota."""
         self.assertIsInstance(MODEL_CHAIN, list)
         self.assertGreaterEqual(len(MODEL_CHAIN), 2)
         self.assertEqual(PRIMARY_MODEL, MODEL_CHAIN[0])
         self.assertEqual(MAX_STEPS, 8, "MAX_STEPS must be lowered to 8 by default")
-        self.assertEqual(QUOTA_PER_DAY, 20, "QUOTA_PER_DAY must be 20 by default")
+        self.assertNotEqual(QUOTA_PER_DAY, 20, "QUOTA_PER_DAY must have no hardcoded default of 20")
         self.assertEqual(CACHE_TTL_SECONDS, 600, "Cache TTL must be 10 minutes (600 seconds)")
 
     def test_system_prompt_parallel_batching(self):

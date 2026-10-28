@@ -84,15 +84,33 @@ MODEL_NAME = PRIMARY_MODEL
 THINKING_LEVEL = os.getenv("THINKING_LEVEL", "medium").strip().lower()
 
 # Quota & Cache Limits (counter only warns, never blocks a provider)
-QUOTA_PER_DAY = int(os.getenv("QUOTA_PER_DAY", "20"))
-QUOTA_WARN_THRESHOLD = int(os.getenv("QUOTA_WARN_THRESHOLD", "20"))
+# Configurable limits with no default of 20 (warn-only, None if unconfigured)
+raw_quota = os.getenv("QUOTA_PER_DAY", "").strip()
+QUOTA_PER_DAY = int(raw_quota) if raw_quota.isdigit() else None
+raw_warn = os.getenv("QUOTA_WARN_THRESHOLD", "").strip()
+QUOTA_WARN_THRESHOLD = int(raw_warn) if raw_warn.isdigit() else None
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
 
-# Execution Limits
+# Execution & Watchdog Limits
 MAX_STEPS = int(os.getenv("MAX_STEPS", "8"))
 MAX_DESKTOP_ACTIONS = int(os.getenv("MAX_DESKTOP_ACTIONS", "25"))
 POWERSHELL_TIMEOUT = int(os.getenv("POWERSHELL_TIMEOUT", "60"))
 PYTHON_TIMEOUT = int(os.getenv("PYTHON_TIMEOUT", "60"))
+TOOL_TIMEOUT = int(os.getenv("TOOL_TIMEOUT", "30"))
+TASK_TIMEOUT = int(os.getenv("TASK_TIMEOUT", "600"))  # 10 minutes default
+SLOW_STEP_THRESHOLD = 10.0
+SLOW_STEPS_LOG_PATH = LOGS_DIR / "slow_steps.log"
+
+# All configured provider keys for comprehensive masking
+ALL_API_KEYS = [
+    k for k in [
+        GEMINI_API_KEY,
+        GROQ_API_KEY,
+        OPENROUTER_API_KEY,
+        OPENAI_API_KEY,
+        OLLAMA_API_KEY,
+    ] if k and len(k) > 4
+]
 
 # Safety Configuration
 AUTO_APPROVE_SAFE = os.getenv("AUTO_APPROVE_SAFE", "false").strip().lower() in ("true", "1", "yes")

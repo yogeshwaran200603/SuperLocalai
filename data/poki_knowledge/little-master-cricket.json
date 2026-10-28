@@ -1,0 +1,17 @@
+{
+  "game": "little-master-cricket",
+  "goal": "Score as many points as possible without collision",
+  "controls": [
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "Space"
+  ],
+  "features": [
+    "player",
+    "obstacles",
+    "score"
+  ],
+  "learned_at": "2026-10-28 19:47:55"
+}

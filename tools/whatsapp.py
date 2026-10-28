@@ -78,12 +78,16 @@ def _vision_locate_element(image_path: str, element_description: str) -> Optiona
             f"Locate the {element_description}. Return ONLY two numbers separated by a comma: X,Y "
             f"representing the pixel coordinates inside the element. Example: 450,220"
         )
+        gen_config = types.GenerateContentConfig(
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+        )
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
                 prompt
-            ]
+            ],
+            config=gen_config,
         )
         text = response.text.strip()
         parts = [int(p.strip()) for p in text.replace("(", "").replace(")", "").split(",") if p.strip().isdigit()]

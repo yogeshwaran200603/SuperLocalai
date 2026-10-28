@@ -6,15 +6,26 @@ Provides run_powershell, open_url, and open_app with shortcuts lookup.
 import subprocess
 import webbrowser
 import os
+import time
 from typing import Dict, Any
 from config import POWERSHELL_TIMEOUT, load_shortcuts
+from safety import is_emergency_stopped
 
 
 def run_powershell(script: str) -> Dict[str, Any]:
     """
     Executes a PowerShell script with powershell -NoProfile -ExecutionPolicy Bypass -Command.
     Enforces a configurable timeout (default 60s) and captures stdout, stderr, and exit code.
+    Interrupts immediately if emergency stop (Ctrl+Alt+Q) is triggered.
     """
+    if is_emergency_stopped():
+        return {
+            "stdout": "",
+            "stderr": "Execution cancelled: Emergency stop (Ctrl+Alt+Q) active.",
+            "exit_code": -1,
+            "success": False,
+        }
+
     cmd = [
         "powershell.exe",
         "-NoProfile",
@@ -23,31 +34,45 @@ def run_powershell(script: str) -> Dict[str, Any]:
         script
     ]
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
-            text=True,
-            timeout=POWERSHELL_TIMEOUT
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
+        start_time = time.time()
+        while proc.poll() is None:
+            if is_emergency_stopped():
+                proc.kill()
+                return {
+                    "stdout": "",
+                    "stderr": "Execution cancelled: Emergency stop (Ctrl+Alt+Q) triggered.",
+                    "exit_code": -1,
+                    "success": False,
+                }
+            if time.time() - start_time > POWERSHELL_TIMEOUT:
+                proc.kill()
+                return {
+                    "stdout": "",
+                    "stderr": f"Execution timed out after {POWERSHELL_TIMEOUT} seconds.",
+                    "exit_code": -1,
+                    "success": False,
+                }
+            time.sleep(0.05)
+
+        stdout, stderr = proc.communicate()
         return {
-            "stdout": proc.stdout.strip(),
-            "stderr": proc.stderr.strip(),
+            "stdout": (stdout or "").strip(),
+            "stderr": (stderr or "").strip(),
             "exit_code": proc.returncode,
-            "success": proc.returncode == 0
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "stdout": "",
-            "stderr": f"Execution timed out after {POWERSHELL_TIMEOUT} seconds.",
-            "exit_code": -1,
-            "success": False
+            "success": proc.returncode == 0,
         }
     except Exception as e:
         return {
             "stdout": "",
             "stderr": f"Failed to execute PowerShell: {str(e)}",
             "exit_code": -1,
-            "success": False
+            "success": False,
         }
 
 

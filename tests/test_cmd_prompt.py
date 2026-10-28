@@ -3,6 +3,8 @@ Unit tests for Command Prompt (CMD) argument handling, app aliases, and UTF-8 co
 """
 
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import unittest
 from unittest.mock import patch, MagicMock
 

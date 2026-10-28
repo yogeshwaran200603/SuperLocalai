@@ -9,8 +9,11 @@ State caching and hashing prevents redundant screen captures when the screen has
 
 import os
 import sys
+if not hasattr(sys, "coinit_flags"):
+    sys.coinit_flags = 2
 import io
 import time
+import threading
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -117,64 +120,101 @@ class ComputerStateEngine:
     def _extract_a11y_tree(self, bounds: Tuple[int, int, int, int], win_title: str) -> List[UIElement]:
         """
         Tier 1: pywinauto UIA accessibility tree.
-        Extracts up to 80 compact interactive elements.
+        Extracts up to 80 compact interactive elements from active window only.
+        Max depth 6, 5s timeout in cancellable worker thread, skips huge trees.
         """
         elements: List[UIElement] = []
         win_x, win_y, win_w, win_h = bounds
 
-        try:
-            import pywinauto
-            desktop = pywinauto.Desktop(backend="uia")
-            windows = desktop.windows()
-            target_win = None
+        def _worker(result_container: list, cancel_event: threading.Event):
+            try:
+                import pywinauto
+                desktop = pywinauto.Desktop(backend="uia")
+                top_windows = desktop.windows()
+                target_win = None
 
-            for w in windows:
+                for w in top_windows:
+                    if cancel_event.is_set():
+                        return
+                    try:
+                        r = w.rectangle()
+                        if abs(r.left - win_x) < 50 and abs(r.top - win_y) < 50:
+                            target_win = w
+                            break
+                    except Exception:
+                        continue
+
+                if not target_win and top_windows:
+                    target_win = top_windows[0]
+
+                if not target_win:
+                    return
+
+                # Skip huge trees (browsers, Electron, canvases)
                 try:
-                    r = w.rectangle()
-                    if abs(r.left - win_x) < 50 and abs(r.top - win_y) < 50:
-                        target_win = w
-                        break
+                    wt = (target_win.window_text() or "").lower()
+                    cn = (target_win.element_info.class_name or "").lower()
+                    huge_signals = (
+                        "chrome", "msedge", "edge", "firefox", "brave", "opera",
+                        "electron", "slack", "discord", "code", "teams", "canvas"
+                    )
+                    if any(s in wt or s in cn for s in huge_signals):
+                        return
                 except Exception:
-                    continue
+                    pass
 
-            if not target_win and windows:
-                target_win = windows[0]
-
-            if target_win:
-                descendants = target_win.descendants()
                 allowed_types = {
                     "Button", "Edit", "MenuItem", "TabItem", "CheckBox",
                     "RadioButton", "Hyperlink", "ListItem", "ComboBox", "Document", "Text"
                 }
 
+                # Breadth-first search with depth limit 6
+                queue = [(target_win, 0)]
                 elem_id = 1
-                for el in descendants:
-                    if elem_id > 80:
-                        break
+
+                while queue and elem_id <= 80 and not cancel_event.is_set():
+                    curr, depth = queue.pop(0)
+                    if depth > 6:
+                        continue
                     try:
-                        info = el.element_info
-                        c_type = info.control_type
-                        name = info.name or ""
-                        if c_type in allowed_types and (name.strip() or c_type in ("Button", "Edit", "MenuItem")):
-                            rect = el.rectangle()
-                            w, h = rect.width(), rect.height()
-                            if w > 5 and h > 5:
-                                cx = rect.left + w // 2
-                                cy = rect.top + h // 2
-                                elements.append(UIElement(
-                                    id=elem_id,
-                                    name=name or f"<{c_type}>",
-                                    control_type=c_type,
-                                    bounds=(rect.left, rect.top, w, h),
-                                    center=(cx, cy),
-                                    source="a11y",
-                                    state="Enabled" if el.is_enabled() else "Disabled"
-                                ))
-                                elem_id += 1
+                        for ch in curr.children():
+                            if cancel_event.is_set() or elem_id > 80:
+                                break
+                            try:
+                                info = ch.element_info
+                                c_type = info.control_type
+                                name = info.name or ""
+                                if c_type in allowed_types and (name.strip() or c_type in ("Button", "Edit", "MenuItem")):
+                                    rect = ch.rectangle()
+                                    w, h = rect.width(), rect.height()
+                                    if w > 5 and h > 5:
+                                        cx = rect.left + w // 2
+                                        cy = rect.top + h // 2
+                                        result_container.append(UIElement(
+                                            id=elem_id,
+                                            name=name or f"<{c_type}>",
+                                            control_type=c_type,
+                                            bounds=(rect.left, rect.top, w, h),
+                                            center=(cx, cy),
+                                            source="a11y",
+                                            state="Enabled" if ch.is_enabled() else "Disabled"
+                                        ))
+                                        elem_id += 1
+                                if depth < 6:
+                                    queue.append((ch, depth + 1))
+                            except Exception:
+                                continue
                     except Exception:
                         continue
-        except Exception:
-            pass
+            except Exception:
+                pass
+
+        cancel_ev = threading.Event()
+        th = threading.Thread(target=_worker, args=(elements, cancel_ev), daemon=True)
+        th.start()
+        th.join(timeout=5.0)
+        if th.is_alive():
+            cancel_ev.set()
 
         return elements
 

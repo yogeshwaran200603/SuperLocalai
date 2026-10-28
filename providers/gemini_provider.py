@@ -6,8 +6,12 @@ call-ID enforcement, and automatic model chain failover on 429/503 errors.
 
 import re
 import math
+import time
 from typing import List, Dict, Any, Optional, Callable, Tuple
 from pathlib import Path
+
+from rich.console import Console
+console = Console()
 
 from config import (
     GEMINI_API_KEY,
@@ -112,14 +116,15 @@ class GeminiProvider(BaseProvider):
             if m not in candidate_pool:
                 candidate_pool.append(m)
 
+        warn_limit = QUOTA_WARN_THRESHOLD or 20
         for m in candidate_pool:
-            if self.memory.get_daily_api_calls(m) < QUOTA_WARN_THRESHOLD:
+            if self.memory.get_daily_api_calls(m) < warn_limit:
                 self.active_model = m
                 break
 
         calls_today = self.memory.get_daily_api_calls(self.active_model)
         status_detail = f"Online (Model: {self.active_model})"
-        if calls_today >= QUOTA_WARN_THRESHOLD:
+        if calls_today >= warn_limit:
             status_detail += f" [Used {calls_today} calls today]"
 
         if hasattr(self.client, "models") and "mock" in type(self.client).__name__.lower():
@@ -253,9 +258,11 @@ class GeminiProvider(BaseProvider):
         last_retry_delay = "24 hours"
         response = None
 
+        backoff_delays = [2, 5, 12, 30]
+        max_attempts = len(backoff_delays)
+
         for candidate_model in candidate_pool:
-            # 3 retries with backoff on 503/504 only
-            for attempt in range(3):
+            for attempt in range(max_attempts + 1):
                 try:
                     response = self.client.models.generate_content(
                         model=candidate_model,
@@ -267,17 +274,27 @@ class GeminiProvider(BaseProvider):
                     break
                 except Exception as api_err:
                     err_str = str(api_err).lower()
-                    if any(term in err_str for term in ("503", "504", "unavailable", "high demand")):
-                        if attempt < 2:
-                            time.sleep(1.0 * (2 ** attempt))
-                            continue
-                        else:
-                            break
-                    elif any(term in err_str for term in ("429", "resource_exhausted", "quota")):
+                    # Never retry 400/401/403 client errors
+                    if any(term in err_str for term in ("400", "invalid_argument", "401", "unauthenticated", "403", "permission_denied")):
+                        raise ProviderError(f"Gemini API error ({candidate_model}): {api_err}")
+
+                    # Daily quota error - do not retry, fall back to next model or provider
+                    is_daily = any(t in err_str for t in ("per day", "daily", "free_tier"))
+                    if is_daily:
                         last_retry_delay = extract_retry_delay(api_err)
                         break
+
+                    # 503, 504, high demand, or non-daily 429
+                    is_transient = any(term in err_str for term in ("503", "504", "unavailable", "high demand", "429", "resource_exhausted", "quota"))
+                    if is_transient and attempt < max_attempts:
+                        delay = backoff_delays[attempt]
+                        console.print(f"[bold yellow]Model busy, retrying in {delay}s ({attempt+1}/{max_attempts})...[/bold yellow]")
+                        time.sleep(delay)
+                        continue
                     else:
-                        raise ProviderError(f"Gemini API error ({candidate_model}): {api_err}")
+                        if any(term in err_str for term in ("429", "resource_exhausted", "quota")):
+                            last_retry_delay = extract_retry_delay(api_err)
+                        break
 
             if response is not None:
                 break

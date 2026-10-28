@@ -17,6 +17,7 @@ if sys.platform == "win32":
 import time
 import re
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console
@@ -35,6 +36,10 @@ from config import (
     CACHE_TTL_SECONDS,
     THINKING_LEVEL,
     MAX_STEPS,
+    TOOL_TIMEOUT,
+    TASK_TIMEOUT,
+    SLOW_STEP_THRESHOLD,
+    SLOW_STEPS_LOG_PATH,
     DESKTOP_DIR,
     DOCUMENTS_DIR,
     DOWNLOADS_DIR,
@@ -65,6 +70,7 @@ from safety import (
     reset_emergency_stop,
     start_emergency_stop_listener,
     reset_desktop_session,
+    format_truthful_status,
 )
 from tools.desktop import reset_desktop_action_count, reset_verification_failures
 from memory import MemoryManager
@@ -571,13 +577,45 @@ class AstraAgent:
             self.memory.record_tool_execution(self.session_id, tool_name, args, res, "DENIED")
             return res
 
-        # 2. Execute tool
+        # 2. Execute tool with per-tool timeout
+        t0 = time.time()
         try:
             console.print(f"[dim]Running {tool_name}...[/dim]")
-            result = func(**args)
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, **args)
+                try:
+                    result = future.result(timeout=TOOL_TIMEOUT)
+                except FuturesTimeout:
+                    t_elapsed = time.time() - t0
+                    err_res = {
+                        "success": False,
+                        "status": "TIMEOUT",
+                        "error": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT}s.",
+                    }
+                    self.memory.record_tool_execution(self.session_id, tool_name, args, err_res, "TIMEOUT")
+                    log_action(tool_name, args, "TIMEOUT", f"Timed out after {TOOL_TIMEOUT}s")
+                    try:
+                        SLOW_STEPS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                        with open(SLOW_STEPS_LOG_PATH, "a", encoding="utf-8") as f:
+                            f.write(f"[{datetime.now().isoformat()}] TIMEOUT ({t_elapsed:.2f}s): {tool_name} args={json.dumps(args, default=str)}\n")
+                    except Exception:
+                        pass
+                    return err_res
+
+            t_elapsed = time.time() - t0
+            if t_elapsed >= SLOW_STEP_THRESHOLD:
+                try:
+                    SLOW_STEPS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                    with open(SLOW_STEPS_LOG_PATH, "a", encoding="utf-8") as f:
+                        f.write(f"[{datetime.now().isoformat()}] SLOW ({t_elapsed:.2f}s): {tool_name} args={json.dumps(args, default=str)}\n")
+                except Exception:
+                    pass
+
             self.memory.record_tool_execution(self.session_id, tool_name, args, result, "SUCCESS")
             return result
         except Exception as e:
+            t_elapsed = time.time() - t0
             err_res = {"success": False, "error": str(e)}
             self.memory.record_tool_execution(self.session_id, tool_name, args, err_res, "ERROR")
             log_action(tool_name, args, "ERROR", str(e))
@@ -646,6 +684,10 @@ class AstraAgent:
         step = 0
         final_text = ""
         failed_attempts = 0
+        task_start_time = time.time()
+        last_elapsed_report = task_start_time
+        recent_tool_signatures: List[str] = []
+        executed_tools_this_turn: List[Dict[str, Any]] = []
 
         # Build fallback provider chain list for this run
         chain_candidates: List[BaseProvider] = [self.active_provider]
@@ -657,10 +699,22 @@ class AstraAgent:
 
         with console.status(f"[bold green]Superlocal ({self.active_provider.name}) is analyzing your request...[/bold green]", spinner="dots") as spinner:
             while step < MAX_STEPS:
+                elapsed_total = time.time() - task_start_time
+                if elapsed_total > TASK_TIMEOUT:
+                    spinner.stop()
+                    msg = f"Task exceeded maximum allowed time limit ({TASK_TIMEOUT}s)."
+                    console.print(f"\n{format_truthful_status('FAILED', msg)}")
+                    return f"Execution halted: {msg}"
+
+                if time.time() - last_elapsed_report >= 10.0:
+                    console.print(f"[dim blue][Watchdog] Step {step} | Elapsed: {int(elapsed_total)}s[/dim blue]")
+                    last_elapsed_report = time.time()
+
                 if is_emergency_stopped():
                     spinner.stop()
-                    console.print("[bold red]Execution stopped: Emergency stop (Ctrl+Alt+Q) triggered.[/bold red]")
-                    return "Superlocal execution halted: Emergency stop (Ctrl+Alt+Q) triggered by user."
+                    msg = "Emergency stop (Ctrl+Alt+Q) triggered by user."
+                    console.print(f"\n{format_truthful_status('FAILED', msg)}")
+                    return f"Superlocal execution halted: {msg}"
 
                 step += 1
                 response: Optional[LLMResponse] = None
@@ -759,28 +813,40 @@ class AstraAgent:
                 ))
 
                 # Execute all function calls (Parallel / Batched execution)
-                executed_tools_this_turn: List[Dict[str, Any]] = []
+                executed_tools_this_turn = []
 
                 for tc in response.tool_calls:
                     if is_emergency_stopped():
                         spinner.stop()
-                        console.print("[bold red]Action aborted: Emergency stop (Ctrl+Alt+Q) active.[/bold red]")
-                        return "Superlocal execution halted: Emergency stop (Ctrl+Alt+Q) triggered by user."
+                        msg = "Emergency stop (Ctrl+Alt+Q) active."
+                        console.print(f"\n{format_truthful_status('FAILED', msg)}")
+                        return f"Superlocal execution halted: {msg}"
 
                     fn_name = tc.name
                     fn_args = tc.arguments
                     tc_id = tc.id
 
+                    # 3 identical consecutive calls watchdog
+                    sig = f"{fn_name}:{json.dumps(fn_args, sort_keys=True, default=str)}"
+                    if len(recent_tool_signatures) >= 2 and recent_tool_signatures[-1] == sig and recent_tool_signatures[-2] == sig:
+                        spinner.stop()
+                        msg = f"No-progress detected: 3 identical consecutive calls to '{fn_name}'. Stopping loop to avoid repeated failure."
+                        console.print(f"\n{format_truthful_status('FAILED', msg)}")
+                        return f"Execution halted: {msg}"
+                    recent_tool_signatures.append(sig)
+
                     spinner.stop()
-                    console.print(f"\n[bold blue]Step {step}/{MAX_STEPS}:[/bold blue] Superlocal selected [bold cyan]{fn_name}[/bold cyan]")
+                    elapsed_now = int(time.time() - task_start_time)
+                    console.print(f"\n[bold blue]Step {step}/{MAX_STEPS} (elapsed: {elapsed_now}s):[/bold blue] Superlocal selected [bold cyan]{fn_name}[/bold cyan]")
 
                     # Run tool with confirmation
                     tool_res = self.execute_tool(fn_name, fn_args)
                     executed_tools_this_turn.append({"name": fn_name, "args": fn_args, "result": tool_res})
 
                     if is_emergency_stopped():
-                        console.print("[bold red]Action aborted: Emergency stop (Ctrl+Alt+Q) active.[/bold red]")
-                        return "Superlocal execution halted: Emergency stop (Ctrl+Alt+Q) triggered by user."
+                        msg = "Emergency stop (Ctrl+Alt+Q) active."
+                        console.print(f"\n{format_truthful_status('FAILED', msg)}")
+                        return f"Superlocal execution halted: {msg}"
 
                     # Retry counter check
                     if not tool_res.get("success", True):
@@ -805,6 +871,25 @@ class AstraAgent:
                 if all_tools_ok:
                     final_text = build_local_summary(executed_tools_this_turn)
                     break
+
+        # Truthful Status: Never print [OK] Task Completed on failure.
+        # Use SUCCESS, PARTIAL, FAILED (with real reason), and BLOCKED (waiting for user).
+        status_category = "SUCCESS"
+        if not final_text:
+            if any(t.get("result", {}).get("status") == "USER_DENIED" for t in executed_tools_this_turn):
+                status_category = "BLOCKED"
+                final_text = "Action cancelled or denied by user."
+            elif any(not t.get("result", {}).get("success", True) for t in executed_tools_this_turn):
+                failed_names = [t["name"] for t in executed_tools_this_turn if not t.get("result", {}).get("success", True)]
+                status_category = "FAILED"
+                final_text = f"Action failed on: {', '.join(failed_names)}."
+            else:
+                status_category = "PARTIAL"
+                final_text = "Task completed partially (maximum steps reached)."
+        elif any(not t.get("result", {}).get("success", True) for t in executed_tools_this_turn):
+            status_category = "PARTIAL"
+
+        console.print(f"\n{format_truthful_status(status_category, final_text)}")
 
         # Cache response if read-only prompt
         if is_read_only_prompt(user_prompt) and final_text:

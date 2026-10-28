@@ -142,12 +142,16 @@ def verify_desktop_action_result(action_type: str, action_details: str, screensh
         )
 
         client = genai.Client(api_key=GEMINI_API_KEY)
+        gen_config = types.GenerateContentConfig(
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+        )
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
                 prompt
-            ]
+            ],
+            config=gen_config
         )
         text = response.text.strip() if response and response.text else ""
         if "VERIFIED: NO" in text.upper():
@@ -251,12 +255,16 @@ def desktop_locate_element(element_description: str, screenshot_path: Optional[s
         )
 
         client = genai.Client(api_key=GEMINI_API_KEY)
+        gen_config = types.GenerateContentConfig(
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+        )
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
                 prompt
-            ]
+            ],
+            config=gen_config
         )
         text = response.text.strip()
         parts = [int(p.strip()) for p in text.replace("(", "").replace(")", "").split(",") if p.strip().isdigit()]
@@ -575,6 +583,9 @@ def get_screen_text() -> Dict[str, Any]:
         # Extract up to 60 control names using pywinauto UIA
         control_names: List[str] = []
         try:
+            import sys
+            if not hasattr(sys, "coinit_flags"):
+                sys.coinit_flags = 2
             import pywinauto
             desktop = pywinauto.Desktop(backend="uia")
             top_windows = desktop.windows()

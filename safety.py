@@ -22,15 +22,37 @@ import keyboard
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
+from rich.markup import escape
+
+console = Console()
 
 from config import (
     ACTIONS_LOG_PATH,
     AUTO_APPROVE_SAFE,
     ALLOWED_DIRECTORIES,
     GEMINI_API_KEY,
+    ALL_API_KEYS,
 )
 
-console = Console()
+
+def mask_all_keys(text: str) -> str:
+    """Sanitizes any configured provider API keys from text or log messages."""
+    if not text:
+        return ""
+    sanitized = str(text)
+    for key in ALL_API_KEYS:
+        if key and key in sanitized:
+            sanitized = sanitized.replace(key, "[REDACTED_API_KEY]")
+    return sanitized
+
+
+def log_action(tool_name: str, args: Dict[str, Any], status: str, details: str = ""):
+    """Logs tool execution to logs/actions.log, sanitizing any sensitive tokens."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    args_str = mask_all_keys(str(args))
+    details_str = mask_all_keys(details)
+
+    log_entry = f"[{timestamp}] [{tool_name}] STATUS={status} ARGS={args_str} DETAILS={details_str}\n"
 
 # Severe Blocklist: Disallowed unconditionally
 BLOCKLIST_PATTERNS = [
@@ -368,3 +390,28 @@ def confirm_sensitive_desktop_action(action_type: str, details: str, target: str
     approved = Confirm.ask("[bold red]This is a sensitive action (password / payment / deletion / submission). Proceed? (y/n)[/bold red]", default=False)
     log_action(f"desktop_{action_type}", {"target": target, "details": details}, "APPROVED" if approved else "USER_DENIED", "Sensitive desktop operation confirmation")
     return approved
+
+
+def format_truthful_status(status: str, message: str) -> str:
+    """
+    Formats a truthful task status. Never prints [OK] Task Completed on failure.
+    Allowed statuses: SUCCESS, PARTIAL, FAILED, BLOCKED.
+    All error/result text is safely escaped with rich.markup.escape.
+    """
+    raw_status = (status or "").upper().strip()
+    if raw_status in ("SUCCESS", "OK", "COMPLETED"):
+        final_status = "SUCCESS"
+        color = "bold green"
+    elif raw_status in ("PARTIAL", "INCOMPLETE"):
+        final_status = "PARTIAL"
+        color = "bold yellow"
+    elif raw_status in ("BLOCKED", "USER_DENIED", "DENIED", "WAITING"):
+        final_status = "BLOCKED"
+        color = "bold magenta"
+    else:
+        final_status = "FAILED"
+        color = "bold red"
+
+    escaped_msg = escape(str(message or ""))
+    return f"[{color}][{final_status}][/{color}] {escaped_msg}"
+

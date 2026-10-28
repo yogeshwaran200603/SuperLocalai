@@ -416,10 +416,17 @@ def test_gemini_live_setup_payload_construction():
     assert "query" in tools_payload[0]["parameters"]["properties"]
 
 
-@pytest.mark.anyio
-async def test_gemini_live_quota_error_triggers_fallback():
-    provider = GeminiLiveProvider(api_key="AIzaSyDummyTestKey", model="gemini-2.0-flash-exp")
-    with patch("websockets.connect", side_effect=Exception("429 RESOURCE_EXHAUSTED: Rate limit reached")):
-        with pytest.raises(GeminiLiveFallbackError) as exc_info:
-            await provider.connect()
-        assert "quota exhausted (429)" in str(exc_info.value)
+def test_gemini_live_quota_error_triggers_fallback():
+    import asyncio
+    import concurrent.futures
+
+    async def _run():
+        provider = GeminiLiveProvider(api_key="AIzaSyDummyTestKey", model="gemini-2.0-flash-exp")
+        with patch("websockets.connect", side_effect=Exception("429 RESOURCE_EXHAUSTED: Rate limit reached")):
+            with pytest.raises(GeminiLiveFallbackError) as exc_info:
+                await provider.connect()
+            assert "quota exhausted (429)" in str(exc_info.value)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(asyncio.run, _run())
+        fut.result(timeout=10)
