@@ -38,7 +38,12 @@ from superlocal.ui.widgets.quick_command import QuickCommandBar
 from superlocal.ui.widgets.control_overlay import ControlOverlayPill
 from superlocal.ui.widgets.tray import SuperLocalTrayIcon
 from superlocal.ui.pages.chat_page import ChatPage
+from superlocal.ui.pages.tasks_page import TasksPage
 from superlocal.ui.pages.voice_page import VoicePage
+from superlocal.ui.pages.games_page import GamesPage
+from superlocal.ui.pages.optimizer_page import OptimizerPage
+from superlocal.ui.pages.skills_page import SkillsPage
+from superlocal.ui.pages.history_page import HistoryPage
 from superlocal.ui.pages.settings_page import SettingsPage
 from superlocal.ui.pages.wizard import is_first_run, SetupWizardDialog
 from core.engine import get_engine, SuperLocalEngine, EngineState
@@ -143,36 +148,54 @@ class SuperLocalMainWindow(QMainWindow):
         self.top_bar.activity_toggle_requested.connect(self.toggle_activity_panel)
         center_layout.addWidget(self.top_bar)
 
-        # Stacked Pages
+        # Stacked Pages (Indices 0 to 7 matching Sidebar.NAV_ITEMS)
         self.page_stack = QStackedWidget(self)
+
+        # 0: Chat
         self.chat_page = ChatPage(self)
         self.chat_page.submit_prompt.connect(self.engine.submit)
         self.chat_page.voice_toggle_requested.connect(lambda: self.sidebar.select_page(2))
+        self.page_stack.addWidget(self.chat_page)
 
-        self.page_stack.addWidget(self.chat_page)  # Index 0: Chat
+        # 1: Tasks (Autopilot)
+        self.tasks_page = TasksPage(self)
+        self.tasks_page.run_goal_requested.connect(
+            lambda goal, dry: self.engine.submit(f"/auto --dry {goal}" if dry else f"/auto {goal}")
+        )
+        self.tasks_page.undo_requested.connect(lambda jid: self.engine.submit("/auto undo"))
+        self.page_stack.addWidget(self.tasks_page)
 
-        # Index 1: Tasks (placeholder for Stage 5)
-        self.tasks_placeholder = QWidget(self)
-        p1_layout = QVBoxLayout(self.tasks_placeholder)
-        p1_label = QLabel(f"Page: {Sidebar.NAV_ITEMS[1][1]} (Loading in upcoming stage...)", self.tasks_placeholder)
-        p1_label.setAlignment(Qt.AlignCenter)
-        p1_layout.addWidget(p1_label)
-        self.page_stack.addWidget(self.tasks_placeholder)
-
-        # Index 2: Voice Page
+        # 2: Voice
         self.voice_page = VoicePage(self)
         self.page_stack.addWidget(self.voice_page)
 
-        # Placeholder widgets for pages built in subsequent stages (3 to 6)
-        for i in range(3, 7):
-            placeholder = QWidget(self)
-            pl_layout = QVBoxLayout(placeholder)
-            pl_label = QLabel(f"Page: {Sidebar.NAV_ITEMS[i][1]} (Loading in upcoming stage...)", placeholder)
-            pl_label.setAlignment(Qt.AlignCenter)
-            pl_layout.addWidget(pl_label)
-            self.page_stack.addWidget(placeholder)
+        # 3: Games (Poki + OpenFront)
+        self.games_page = GamesPage(self)
+        self.games_page.play_poki_requested.connect(
+            lambda g, goal: self.engine.submit(f"/poki play {g} --goal '{goal}'" if goal else f"/poki play {g}")
+        )
+        self.games_page.stop_poki_requested.connect(lambda: self.engine.submit("/poki stop"))
+        self.games_page.run_openfront_requested.connect(
+            lambda url, strat: self.engine.submit(f"/openfront play --server '{url}'")
+        )
+        self.page_stack.addWidget(self.games_page)
 
-        # Index 7: Settings
+        # 4: Optimizer
+        self.optimizer_page = OptimizerPage(self)
+        self.optimizer_page.scan_requested.connect(lambda: self.engine.submit("/optimize scan"))
+        self.optimizer_page.clean_requested.connect(lambda cats: self.engine.submit("/optimize clean"))
+        self.optimizer_page.undo_requested.connect(lambda: self.engine.submit("/optimize undo"))
+        self.page_stack.addWidget(self.optimizer_page)
+
+        # 5: Skills & Tools
+        self.skills_page = SkillsPage(self)
+        self.page_stack.addWidget(self.skills_page)
+
+        # 6: History
+        self.history_page = HistoryPage(self)
+        self.page_stack.addWidget(self.history_page)
+
+        # 7: Settings
         self.settings_page = SettingsPage(self)
         self.page_stack.addWidget(self.settings_page)
 
