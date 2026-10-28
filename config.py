@@ -173,6 +173,16 @@ def load_shortcuts() -> dict:
         return {}
 
 
+def save_shortcuts(data: dict) -> bool:
+    """Saves shortcuts dictionary to shortcuts.json."""
+    try:
+        with open(SHORTCUTS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
 def get_system_prompt() -> str:
     """Returns the system prompt with user shortcuts injected."""
     shortcuts = load_shortcuts()

@@ -11,6 +11,7 @@ Combines:
 - Engine Crash Recovery & Restart Banner
 """
 
+import os
 from PySide6.QtCore import Qt, QObject, Signal, QTimer
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -31,6 +32,8 @@ from superlocal.ui.widgets.status_bar import StatusBar
 from superlocal.ui.widgets.activity_panel import ActivityPanel
 from superlocal.ui.widgets.approval_dialog import ApprovalDialog
 from superlocal.ui.pages.chat_page import ChatPage
+from superlocal.ui.pages.settings_page import SettingsPage
+from superlocal.ui.pages.wizard import is_first_run, SetupWizardDialog
 from core.engine import get_engine, SuperLocalEngine, EngineState
 from core.events import EventType, Event
 
@@ -141,14 +144,18 @@ class SuperLocalMainWindow(QMainWindow):
 
         self.page_stack.addWidget(self.chat_page)  # Index 0: Chat
 
-        # Placeholder widgets for pages built in subsequent stages
-        for i in range(1, 8):
+        # Placeholder widgets for pages built in subsequent stages (1 to 6)
+        for i in range(1, 7):
             placeholder = QWidget(self)
             pl_layout = QVBoxLayout(placeholder)
             pl_label = QLabel(f"Page: {Sidebar.NAV_ITEMS[i][1]} (Loading in upcoming stage...)", placeholder)
             pl_label.setAlignment(Qt.AlignCenter)
             pl_layout.addWidget(pl_label)
             self.page_stack.addWidget(placeholder)
+
+        # Index 7: Settings
+        self.settings_page = SettingsPage(self)
+        self.page_stack.addWidget(self.settings_page)
 
         center_layout.addWidget(self.page_stack, stretch=1)
         body_layout.addWidget(center_area, stretch=1)
@@ -172,6 +179,18 @@ class SuperLocalMainWindow(QMainWindow):
 
         # Connect Qt event bridge to engine
         self._wire_engine_events()
+
+        # First run check
+        if (
+            is_first_run()
+            and os.environ.get("SUPERLOCAL_NO_WIZARD") != "1"
+            and os.environ.get("QT_QPA_PLATFORM") != "offscreen"
+        ):
+            QTimer.singleShot(150, self._show_first_run_wizard)
+
+    def _show_first_run_wizard(self):
+        wizard = SetupWizardDialog(self)
+        wizard.exec()
 
     def _wire_engine_events(self):
         # Forward all engine events to Qt bridge
