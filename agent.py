@@ -261,6 +261,17 @@ def try_local_first_execution(prompt: str) -> Optional[str]:
             return "Command handled locally: Showing recent sessions."
         if p_lower == "/health":
             return "Command handled locally: Provider health status checked."
+        if p_lower in ("/selftest", "selftest"):
+            from selftest import run_selftest
+            passed, _ = run_selftest()
+            return "Self-test passed: all essential systems operational." if passed else "Self-test completed with warnings."
+        if p_lower.startswith("/openfront"):
+            from openfront import handle_openfront_command
+            return handle_openfront_command(p)
+        if p_lower in ("/stop", "stop"):
+            from safety import trigger_emergency_stop
+            trigger_emergency_stop("Stopped by user command /stop")
+            return "Emergency stop signal triggered."
         if p_lower.startswith("/quota"):
             if "reset" in p_lower:
                 MemoryManager().reset_daily_usage()

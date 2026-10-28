@@ -485,6 +485,17 @@ def main():
         if single_prompt.lower().startswith("/optimize"):
             handle_optimizer_command(single_prompt)
             return
+        if single_prompt.lower() in ("/selftest", "selftest"):
+            from selftest import run_selftest
+            run_selftest()
+            return
+        if single_prompt.lower() in ("/health", "health"):
+            show_health()
+            return
+        if single_prompt.lower().startswith("/openfront") or single_prompt.lower().startswith("@openfront"):
+            from openfront import handle_openfront_command
+            handle_openfront_command(single_prompt)
+            return
 
         agent = AstraAgent()
         if launch_voice:
@@ -548,6 +559,22 @@ def main():
 
             if cmd_lower == "/health":
                 show_health(agent)
+                continue
+
+            if cmd_lower in ("/selftest", "selftest"):
+                from selftest import run_selftest
+                run_selftest()
+                continue
+
+            if cmd_lower in ("/stop", "stop"):
+                from safety import trigger_emergency_stop
+                trigger_emergency_stop("Interactive /stop command")
+                console.print("[bold red]Emergency stop signal triggered.[/bold red]")
+                continue
+
+            if cmd_lower.startswith("/openfront") or cmd_lower.startswith("@openfront"):
+                from openfront import handle_openfront_command
+                handle_openfront_command(clean_input)
                 continue
 
             if cmd_lower.startswith("/quota"):
