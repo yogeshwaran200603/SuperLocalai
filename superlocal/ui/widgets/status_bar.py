@@ -73,8 +73,14 @@ class StatusBar(QWidget):
         else:
             self.engine_dot.setStyleSheet(f"color: {Colors.SUCCESS}; font-size: 11px;")
 
-    def set_mic_state(self, state_text: str):
-        self.mic_label.setText(f"Mic: {state_text}")
+    def set_mic_state(self, state_val):
+        if isinstance(state_val, bool):
+            txt = "Listening" if state_val else "Off"
+        else:
+            txt = str(state_val)
+        self.mic_label.setText(f"Mic: {txt}")
+
+    set_mic_status = set_mic_state
 
     def set_workspace(self, path_str: str):
         self.workspace_label.setText(path_str)

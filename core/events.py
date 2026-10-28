@@ -51,9 +51,13 @@ class EventBus:
             if event_name in self._subscribers and callback in self._subscribers[event_name]:
                 self._subscribers[event_name].remove(callback)
 
-    def emit(self, event_name: str, **kwargs) -> Event:
+    def emit(self, event_name: str, data: Optional[Dict[str, Any]] = None, **kwargs) -> Event:
         """Emits an event to all subscribers."""
-        event = Event(name=event_name, data=kwargs)
+        payload = {}
+        if data and isinstance(data, dict):
+            payload.update(data)
+        payload.update(kwargs)
+        event = Event(name=event_name, data=payload)
         with self._lock:
             targets = list(self._subscribers.get(event_name, []))
             wildcard_targets = list(self._subscribers.get("*", []))

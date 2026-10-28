@@ -13,6 +13,7 @@ Combines:
 
 import os
 from PySide6.QtCore import Qt, QObject, Signal, QTimer
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -24,6 +25,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QFrame,
     QMessageBox,
+    QSystemTrayIcon,
+    QApplication,
 )
 from superlocal.ui.theme import Colors, get_stylesheet
 from superlocal.ui.widgets.sidebar import Sidebar
@@ -31,7 +34,11 @@ from superlocal.ui.widgets.top_bar import TopBar
 from superlocal.ui.widgets.status_bar import StatusBar
 from superlocal.ui.widgets.activity_panel import ActivityPanel
 from superlocal.ui.widgets.approval_dialog import ApprovalDialog
+from superlocal.ui.widgets.quick_command import QuickCommandBar
+from superlocal.ui.widgets.control_overlay import ControlOverlayPill
+from superlocal.ui.widgets.tray import SuperLocalTrayIcon
 from superlocal.ui.pages.chat_page import ChatPage
+from superlocal.ui.pages.voice_page import VoicePage
 from superlocal.ui.pages.settings_page import SettingsPage
 from superlocal.ui.pages.wizard import is_first_run, SetupWizardDialog
 from core.engine import get_engine, SuperLocalEngine, EngineState
@@ -144,8 +151,20 @@ class SuperLocalMainWindow(QMainWindow):
 
         self.page_stack.addWidget(self.chat_page)  # Index 0: Chat
 
-        # Placeholder widgets for pages built in subsequent stages (1 to 6)
-        for i in range(1, 7):
+        # Index 1: Tasks (placeholder for Stage 5)
+        self.tasks_placeholder = QWidget(self)
+        p1_layout = QVBoxLayout(self.tasks_placeholder)
+        p1_label = QLabel(f"Page: {Sidebar.NAV_ITEMS[1][1]} (Loading in upcoming stage...)", self.tasks_placeholder)
+        p1_label.setAlignment(Qt.AlignCenter)
+        p1_layout.addWidget(p1_label)
+        self.page_stack.addWidget(self.tasks_placeholder)
+
+        # Index 2: Voice Page
+        self.voice_page = VoicePage(self)
+        self.page_stack.addWidget(self.voice_page)
+
+        # Placeholder widgets for pages built in subsequent stages (3 to 6)
+        for i in range(3, 7):
             placeholder = QWidget(self)
             pl_layout = QVBoxLayout(placeholder)
             pl_label = QLabel(f"Page: {Sidebar.NAV_ITEMS[i][1]} (Loading in upcoming stage...)", placeholder)
@@ -177,6 +196,33 @@ class SuperLocalMainWindow(QMainWindow):
         self.top_bar.update_provider_info(status_info.get("provider", "gemini"), status_info.get("model", "default"))
         self.top_bar.update_quota(status_info.get("requests_today", 0), status_info.get("quota_per_day", 1000))
 
+        # Stage 4: Quick Command Bar, Control Overlay Pill, Global Hotkeys, and System Tray
+        self.quick_bar = QuickCommandBar(self)
+        self.quick_bar.submitted.connect(self.engine.submit)
+
+        self.control_pill = ControlOverlayPill(self)
+        self.control_pill.stop_requested.connect(self.engine.stop)
+        self.control_pill.pause_requested.connect(self._on_toggle_pause)
+
+        # Global hotkeys within app window: Ctrl+Alt+Space, Ctrl+Alt+Q, Ctrl+Alt+P
+        self.shortcut_quick = QShortcut(QKeySequence("Ctrl+Alt+Space"), self)
+        self.shortcut_quick.activated.connect(self.quick_bar.show_centered)
+
+        self.shortcut_stop = QShortcut(QKeySequence("Ctrl+Alt+Q"), self)
+        self.shortcut_stop.activated.connect(self.engine.stop)
+
+        self.shortcut_pause = QShortcut(QKeySequence("Ctrl+Alt+P"), self)
+        self.shortcut_pause.activated.connect(self._on_toggle_pause)
+
+        # System Tray
+        self._quitting = False
+        self.tray_icon = SuperLocalTrayIcon(self)
+        self.tray_icon.restore_requested.connect(self._restore_from_tray)
+        self.tray_icon.stop_requested.connect(self.engine.stop)
+        self.tray_icon.quit_requested.connect(self._force_quit)
+        if QSystemTrayIcon.isSystemTrayAvailable() and os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            self.tray_icon.show()
+
         # Connect Qt event bridge to engine
         self._wire_engine_events()
 
@@ -204,6 +250,7 @@ class SuperLocalMainWindow(QMainWindow):
         self.bridge.status_updated.connect(self._on_status)
         self.bridge.provider_changed.connect(self._on_provider_changed)
         self.bridge.quota_updated.connect(self._on_quota_updated)
+        self.bridge.voice_state_updated.connect(self._on_voice_state)
         self.bridge.error_occurred.connect(self._on_error)
 
     def _on_page_changed(self, index: int):
@@ -224,12 +271,16 @@ class SuperLocalMainWindow(QMainWindow):
         self.chat_page.add_message(role, text)
 
     def _on_step_started(self, data: dict):
-        self.status_bar.set_engine_state(f"Working: {data.get('tool_name', 'action')}")
+        tool_name = data.get("tool_name", "action")
+        self.status_bar.set_engine_state(f"Working: {tool_name}")
         self.activity_panel.on_step_started(
             data.get("step", 1),
-            data.get("tool_name", "tool"),
+            tool_name,
             data.get("elapsed", 0.0),
         )
+        self.control_pill.update_step(tool_name)
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            self.control_pill.show_pill()
 
     def _on_step_finished(self, data: dict):
         self.activity_panel.on_step_finished(
@@ -244,6 +295,20 @@ class SuperLocalMainWindow(QMainWindow):
         st = data.get("status", "SUCCESS")
         msg = data.get("message", "")
         self.status_bar.set_engine_state(self.engine.state)
+        if self.engine.state in (EngineState.IDLE, EngineState.STOPPED):
+            self.control_pill.hide()
+
+    def _on_voice_state(self, data: dict):
+        state = data.get("state", "idle")
+        rms = data.get("rms", 0.0)
+        self.voice_page.set_voice_state(state)
+        self.voice_page.update_audio_level(rms)
+        self.voice_page.update_transcripts(
+            partial=data.get("partial", ""),
+            final=data.get("final", ""),
+            reply=data.get("reply", ""),
+        )
+        self.status_bar.set_mic_status(state == "listening")
 
     def _on_provider_changed(self, data: dict):
         self.top_bar.update_provider_info(data.get("provider", ""), data.get("model", ""))
@@ -278,3 +343,33 @@ class SuperLocalMainWindow(QMainWindow):
         self.error_banner.hide()
         self.engine.restart()
         self.status_bar.set_engine_state(self.engine.state)
+
+    def _restore_from_tray(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _force_quit(self):
+        self._quitting = True
+        self.engine.stop()
+        if hasattr(self, "tray_icon"):
+            self.tray_icon.hide()
+        if hasattr(self, "control_pill"):
+            self.control_pill.hide()
+        if hasattr(self, "quick_bar"):
+            self.quick_bar.hide()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        if not self._quitting and QSystemTrayIcon.isSystemTrayAvailable() and os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            event.ignore()
+            self.hide()
+            self.tray_icon.showMessage(
+                "SuperLocal",
+                "SuperLocal is running in the background. Click the tray icon to restore.",
+                QSystemTrayIcon.Information,
+                2000,
+            )
+        else:
+            self._force_quit()
+            event.accept()
