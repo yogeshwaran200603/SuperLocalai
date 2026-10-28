@@ -330,7 +330,7 @@ class VoiceAssistant:
 
         # Now that an authorized, valid command is confirmed, enter THINKING state
         self.status = "THINKING"
-        console.print(f"\n[bold cyan]You [{lang}]:[/bold cyan] {clean_transcript}")
+        console.print(f"\n[bold cyan]You:[/bold cyan] {clean_transcript}")
         if command != clean_transcript:
             console.print(f"[dim]Command:[/dim] {command}")
 
@@ -429,7 +429,7 @@ class VoiceAssistant:
         try:
             summary = self.agent.run(command)
             if summary:
-                console.print(Panel(summary, title="SuperLocal", border_style="green"))
+                console.print(f"[bold green]SuperLocal:[/bold green] {summary}")
                 # Speak short 1-2 sentence version
                 self.status = "SPEAKING"
                 self.tts.speak(summary, summarize=True)
