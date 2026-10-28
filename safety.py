@@ -186,6 +186,19 @@ def inspect_powershell_safety(script: str) -> Tuple[bool, str, bool]:
     return False, "Safe", False
 
 
+_approval_callback: Optional[Any] = None
+
+
+def set_approval_callback(cb: Optional[Any]) -> None:
+    """Sets a GUI or external callback for interactive action approval."""
+    global _approval_callback
+    _approval_callback = cb
+
+
+def get_approval_callback() -> Optional[Any]:
+    return _approval_callback
+
+
 def confirm_action(tool_name: str, args: Dict[str, Any], prompt_message: Optional[str] = None) -> bool:
     """
     Evaluates whether an action requires confirmation, prompts the user if needed,
@@ -221,6 +234,14 @@ def confirm_action(tool_name: str, args: Dict[str, Any], prompt_message: Optiona
 
         if tool_name == "file_delete":
             target_path = args.get("path", "")
+            if _approval_callback is not None:
+                return _approval_callback({
+                    "action_type": "file_delete",
+                    "details": args,
+                    "risk_level": "high",
+                    "target": target_path,
+                    "message": f"Permanently delete '{target_path}'?",
+                })
             console.print(Panel(
                 f"[bold red]Target Path:[/bold red] {target_path}",
                 title="Confirm File Deletion",
@@ -255,6 +276,16 @@ def confirm_action(tool_name: str, args: Dict[str, Any], prompt_message: Optiona
         pass
 
     # Default prompt for other actions (file_write, desktop_click, etc.)
+    if _approval_callback is not None:
+        target_path = str(args.get("path") or args.get("file_path") or args.get("directory") or args.get("url") or "")
+        return _approval_callback({
+            "action_type": tool_name,
+            "details": args,
+            "risk_level": "medium",
+            "target": target_path,
+            "message": prompt_message or f"Execute tool '{tool_name}'",
+        })
+
     summary = prompt_message or f"Execute tool [bold]{tool_name}[/bold] with args:\n{args}"
     console.print(Panel(summary, title="Confirm Action", border_style="cyan"))
     approved = Confirm.ask("[bold]Run? (y/n)[/bold]", default=True)
@@ -349,6 +380,18 @@ def check_desktop_session_permission() -> bool:
     if _desktop_session_approved:
         return True
 
+    if _approval_callback is not None:
+        approved = _approval_callback({
+            "action_type": "desktop_session",
+            "details": {},
+            "risk_level": "medium",
+            "target": "Desktop mouse & keyboard",
+            "message": "SuperLocal will control your mouse and keyboard. Move mouse to top-left corner or press Ctrl+Alt+Q to stop.",
+        })
+        _desktop_session_approved = approved
+        log_action("desktop_session", {}, "APPROVED" if approved else "DENIED", "Desktop session approval via GUI callback")
+        return approved
+
     console.print("\n[bold yellow]Astra will control your mouse and keyboard. Move the mouse to the top-left corner or press Ctrl+Alt+Q to stop.[/bold yellow]")
     approved = Confirm.ask("[bold]Allow desktop control? (y/n)[/bold]", default=False)
     if approved:
@@ -376,6 +419,15 @@ def confirm_sensitive_desktop_action(action_type: str, details: str, target: str
     """
     Prompts mandatory interactive confirmation for password typing or send/pay/delete/confirm actions.
     """
+    if _approval_callback is not None:
+        return _approval_callback({
+            "action_type": f"desktop_{action_type}",
+            "details": {"action": action_type, "details": details},
+            "risk_level": "high",
+            "target": target,
+            "message": f"Sensitive desktop operation ({action_type}): {details}",
+        })
+
     prompt_str = f"Desktop Action: [bold cyan]{action_type}[/bold cyan]"
     if target:
         prompt_str += f"\nTarget: [bold yellow]{target}[/bold yellow]"
